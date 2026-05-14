@@ -1,0 +1,42 @@
+# parallel-sessions plan
+#
+# Declare 3-5 INDEPENDENT threads. Each thread gets its own git worktree and
+# its own Claude Code session.
+#
+# RULES the CLI enforces:
+#   - 3 <= thread count <= 5
+#   - thread ids must be unique
+#   - branch slugs must be unique
+#   - no thread's `owns` path may overlap (or be a prefix of) another thread's
+#     `owns` path. overlap == merge hell == defeats the point.
+#
+# CONVENTIONS:
+#   - `owns`     paths this thread is allowed to edit
+#   - `forbids`  paths this thread must NOT edit (usually = union of others'
+#                `owns`). these are also written into THREAD_BRIEF.md so the
+#                session's Claude sees them.
+#   - `merge_order` the position in your intended landing sequence (1 = first)
+
+[[threads]]
+id = 1
+branch = "extract-auth"
+goal = "Move auth middleware out of services/api into services/auth"
+owns = ["services/auth/", "tests/auth/"]
+forbids = ["services/payments/", "services/orders/", "platform/models/"]
+merge_order = 1
+
+[[threads]]
+id = 2
+branch = "models-package"
+goal = "Consolidate ORM models under platform/models"
+owns = ["platform/models/", "tests/platform/models/"]
+forbids = ["services/auth/", "services/payments/", "services/orders/"]
+merge_order = 2
+
+[[threads]]
+id = 3
+branch = "deprecate-v1-routes"
+goal = "Remove deprecated /v1/* routes and regenerate the OpenAPI spec"
+owns = ["services/api/routes/v1/", "docs/openapi.yaml"]
+forbids = ["services/auth/", "platform/models/"]
+merge_order = 3
