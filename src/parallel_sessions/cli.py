@@ -10,9 +10,13 @@ from typing import Any
 
 try:
     import tomllib
-except ModuleNotFoundError:  # pragma: no cover
+except ModuleNotFoundError as err:  # pragma: no cover
     sys.stderr.write("parallel-sessions requires Python 3.11+ (needs tomllib)\n")
-    raise SystemExit(2)
+    raise SystemExit(2) from err
+
+
+THREAD_BRIEF = "THREAD_BRIEF.md"
+NO_WORKTREES = "no worktrees"
 
 
 # ---------- plan parsing + validation ----------
@@ -42,6 +46,14 @@ def validate_plan(plan: dict[str, Any]) -> list[dict[str, Any]]:
     if not 3 <= len(threads) <= 5:
         die(f"plan must declare 3-5 threads (got {len(threads)})")
 
+    _check_required_fields(threads)
+    _check_uniqueness(threads)
+    _check_path_overlap(threads)
+
+    return sorted(threads, key=lambda t: t.get("merge_order", t["id"]))
+
+
+def _check_required_fields(threads: list[dict[str, Any]]) -> None:
     required = {"id", "branch", "goal", "owns"}
     for t in threads:
         missing = required - set(t.keys())
@@ -50,25 +62,34 @@ def validate_plan(plan: dict[str, Any]) -> list[dict[str, Any]]:
         if not t["owns"]:
             die(f"thread {t['id']} has empty owns — declare at least one owned path")
 
+
+def _check_uniqueness(threads: list[dict[str, Any]]) -> None:
     ids = [t["id"] for t in threads]
     if len(set(ids)) != len(ids):
         die("thread ids must be unique")
-
     branches = [t["branch"] for t in threads]
     if len(set(branches)) != len(branches):
         die("thread branches must be unique")
 
+
+def _check_path_overlap(threads: list[dict[str, Any]]) -> None:
     for i, t_a in enumerate(threads):
         for t_b in threads[i + 1 :]:
-            for pa in t_a["owns"]:
-                for pb in t_b["owns"]:
-                    if _paths_collide(pa, pb):
-                        die(
-                            f"path overlap: thread {t_a['id']} owns '{pa}' overlaps "
-                            f"thread {t_b['id']} owns '{pb}'"
-                        )
+            collision = _find_overlap(t_a["owns"], t_b["owns"])
+            if collision is not None:
+                pa, pb = collision
+                die(
+                    f"path overlap: thread {t_a['id']} owns '{pa}' overlaps "
+                    f"thread {t_b['id']} owns '{pb}'"
+                )
 
-    return sorted(threads, key=lambda t: t.get("merge_order", t["id"]))
+
+def _find_overlap(owns_a: list[str], owns_b: list[str]) -> tuple[str, str] | None:
+    for pa in owns_a:
+        for pb in owns_b:
+            if _paths_collide(pa, pb):
+                return pa, pb
+    return None
 
 
 # ---------- git helpers ----------
@@ -140,7 +161,7 @@ def cmd_status(args: argparse.Namespace) -> None:
     repo_root = git_repo_root()
     worktrees_dir = repo_root / "worktrees"
     if not worktrees_dir.exists():
-        print("no worktrees")
+        print(NO_WORKTREES)
         return
 
     main_branch = detect_main_branch()
@@ -158,7 +179,7 @@ def cmd_status(args: argparse.Namespace) -> None:
         rows.append((wt.name, branch, ahead, dirty, last))
 
     if not rows:
-        print("no worktrees")
+        print(NO_WORKTREES)
         return
 
     print(f"{'WORKTREE':<14} {'BRANCH':<48} {'AHEAD':<6} {'STATE':<6} LAST COMMIT")
@@ -185,7 +206,7 @@ def cmd_converge(args: argparse.Namespace) -> None:
         if ahead == 0:
             continue
         branch = _capture(["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=wt).strip()
-        brief = wt / "THREAD_BRIEF.md"
+        brief = wt / THREAD_BRIEF
         goal = _parse_goal(brief) if brief.exists() else branch
         candidates.append((wt, branch, goal))
 
@@ -212,44 +233,52 @@ def cmd_cleanup(args: argparse.Namespace) -> None:
     repo_root = git_repo_root()
     worktrees_dir = repo_root / "worktrees"
     if not worktrees_dir.exists():
-        print("no worktrees")
+        print(NO_WORKTREES)
         return
 
     main_branch = detect_main_branch()
-
-    # Best-effort fetch so 'merged into origin/main' check is accurate
+    # Best-effort fetch so 'merged into origin/main' check is accurate.
     subprocess.run(["git", "fetch", "origin"], check=False)
 
     removed: list[str] = []
     skipped: list[tuple[str, str]] = []
-
     for wt in sorted(worktrees_dir.iterdir()):
         if not (wt / ".git").exists():
             continue
-        if working_tree_dirty(cwd=wt):
-            skipped.append((wt.name, "dirty"))
-            continue
+        verdict = _cleanup_one(wt, main_branch)
+        if verdict[0] == "removed":
+            removed.append(wt.name)
+        else:
+            skipped.append((wt.name, verdict[1]))
 
-        branch = _capture(["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=wt).strip()
+    _print_cleanup_report(removed, skipped)
 
-        try:
-            subprocess.check_call(
-                ["git", "merge-base", "--is-ancestor", "HEAD", f"origin/{main_branch}"],
-                cwd=str(wt),
-                stderr=subprocess.DEVNULL,
-            )
-            merged = True
-        except subprocess.CalledProcessError:
-            merged = False
 
-        if not merged:
-            skipped.append((wt.name, "unmerged commits"))
-            continue
+def _cleanup_one(wt: Path, main_branch: str) -> tuple[str, str]:
+    """Inspect one worktree; remove it if safe. Return (verdict, detail)."""
+    if working_tree_dirty(cwd=wt):
+        return "skipped", "dirty"
+    branch = _capture(["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=wt).strip()
+    if not _is_merged_to_origin(wt, main_branch):
+        return "skipped", "unmerged commits"
+    _run(["git", "worktree", "remove", str(wt)])
+    subprocess.run(["git", "branch", "-D", branch], check=False)
+    return "removed", ""
 
-        _run(["git", "worktree", "remove", str(wt)])
-        subprocess.run(["git", "branch", "-D", branch], check=False)
-        removed.append(wt.name)
 
+def _is_merged_to_origin(wt: Path, main_branch: str) -> bool:
+    try:
+        subprocess.check_call(
+            ["git", "merge-base", "--is-ancestor", "HEAD", f"origin/{main_branch}"],
+            cwd=str(wt),
+            stderr=subprocess.DEVNULL,
+        )
+        return True
+    except subprocess.CalledProcessError:
+        return False
+
+
+def _print_cleanup_report(removed: list[str], skipped: list[tuple[str, str]]) -> None:
     if removed:
         print(f"removed: {', '.join(removed)}")
     if skipped:
@@ -266,8 +295,8 @@ def cmd_cleanup(args: argparse.Namespace) -> None:
 def _write_thread_brief(wt_path: Path, thread: dict[str, Any]) -> None:
     owns = thread.get("owns", [])
     forbids = thread.get("forbids", [])
-    brief = wt_path / "THREAD_BRIEF.md"
-    _exclude_locally(wt_path, "THREAD_BRIEF.md")
+    brief = wt_path / THREAD_BRIEF
+    _exclude_locally(wt_path, THREAD_BRIEF)
     brief.write_text(
         f"""# Thread {thread['id']}: {thread['branch']}
 

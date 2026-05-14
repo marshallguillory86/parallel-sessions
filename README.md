@@ -1,5 +1,9 @@
 # parallel-sessions
 
+[![CI](https://github.com/marshallguillory86/parallel-sessions/actions/workflows/ci.yml/badge.svg)](https://github.com/marshallguillory86/parallel-sessions/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
+
 A Claude Code skill + CLI for running 3-5 Claude Code sessions in parallel on the same repo, via [git worktrees](https://git-scm.com/docs/git-worktree).
 
 > Inspired by A. Horn's tip on LinkedIn:
@@ -86,11 +90,13 @@ The CLI generates a `THREAD_BRIEF.md` in each worktree from these fields, so the
 ## When to use it
 
 Good fits:
+
 - N independent refactors in the same repo
 - N unrelated bug fixes
 - N feature flags / experiments scoped to disjoint modules
 
 Bad fits — the CLI will refuse or you should pick a different tool:
+
 - Tasks that touch overlapping files (CLI refuses).
 - Single tasks (just use one session).
 - Sub-agent fanout *inside* one session — use Claude Code's built-in `Agent` tool with `isolation: "worktree"` instead.
@@ -98,6 +104,7 @@ Bad fits — the CLI will refuse or you should pick a different tool:
 ## Design tradeoff
 
 The skill optimizes for **human-attended parallelism**: one operator, N terminals, N reviewable PRs. It deliberately does *not*:
+
 - Auto-launch terminals (you'd lose oversight per thread)
 - Auto-merge PRs (you decide landing order, even if you already declared one)
 - Resolve cross-thread merge conflicts (if they happen despite the path map, you fix them at PR-merge time)

@@ -1,0 +1,97 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: test (py${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install package + dev deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Lint (ruff)
+        run: ruff check src tests
+
+      - name: Tests (pytest)
+        run: pytest -q
+
+      - name: CLI smoke (--help)
+        run: parallel-sessions --help
+
+  end-to-end:
+    name: end-to-end smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - run: pip install -e .
+
+      - name: Configure git identity
+        run: |
+          git config --global user.email "ci@example.com"
+          git config --global user.name "CI"
+
+      - name: Fanout / status / converge --no-push in a throwaway repo
+        run: |
+          set -euo pipefail
+          TMP=$(mktemp -d)
+          cd "$TMP"
+          git init -q -b main
+          mkdir -p a b c
+          echo a > a/a.py
+          echo b > b/b.py
+          echo c > c/c.py
+          cat > plan.toml <<'EOF'
+          [[threads]]
+          id = 1
+          branch = "t1"
+          goal = "thread 1"
+          owns = ["a/"]
+          merge_order = 1
+          [[threads]]
+          id = 2
+          branch = "t2"
+          goal = "thread 2"
+          owns = ["b/"]
+          merge_order = 2
+          [[threads]]
+          id = 3
+          branch = "t3"
+          goal = "thread 3"
+          owns = ["c/"]
+          merge_order = 3
+          EOF
+          git add . && git commit -qm init
+          parallel-sessions fanout plan.toml
+          parallel-sessions status
+          # Simulate a commit in thread-1 so converge has something to print.
+          ( cd worktrees/thread-1 && echo edit >> a/a.py && git commit -aqm "edit" )
+          parallel-sessions converge --no-push
