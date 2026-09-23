@@ -1,4 +1,4 @@
-<!-- WORKSPACE-PREAMBLE v2 — managed by workspace-config. Do not edit below
+<!-- WORKSPACE-PREAMBLE v3 — managed by workspace-config. Do not edit below
      this line by hand; edit workspace-config/claude/repo-preamble.md and run
      ./install.sh. Repo-specific rules go AFTER the end marker. -->
 
@@ -51,6 +51,20 @@ destroyed finished work twice.
 **Verify, do not assert.** A claim about the state of the world is checked
 against the world — the API, the file, the deployed page — and a check that
 cannot see what an earlier search found is a check shaped to pass.
+
+**Semantic versioning, for packages and for documents.** `MAJOR.MINOR.PATCH`:
+major for a breaking change, minor for a feature or new content, patch for a
+fix. Before 1.0 a feature is a minor bump (0.9.1 → 0.10.0).
+
+- **Packages bump at release scope.** Not every fix, and never a long run of
+  merged work at a frozen number. When a set of merged work amounts to a
+  release, bump it and say which packages moved and why. If the repo does not
+  say what a release is, ask.
+- **Every content change to a versioned document bumps its version in the same
+  commit**, a link fix included: patch for fixes and wording, minor for new
+  content or decisions. A version in a file name must match the header, and the
+  rendered copy follows. Where a repo has a version lint or hook, it enforces
+  this; where it does not, you do.
 
 **Wrap up with: files / tests / still open.**
 
