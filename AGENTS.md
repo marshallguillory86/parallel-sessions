@@ -1,4 +1,4 @@
-<!-- WORKSPACE-PREAMBLE v3 — managed by workspace-config. Do not edit below
+<!-- WORKSPACE-PREAMBLE v4 — managed by workspace-config. Do not edit below
      this line by hand; edit workspace-config/claude/repo-preamble.md and run
      ./install.sh. Repo-specific rules go AFTER the end marker. -->
 
@@ -33,8 +33,17 @@ says so out loud.
 a check fail afterwards proves the check bites; it says nothing about what was
 never tested at all.
 
-**Roles.** Claude implements. Codex writes tests and edits docs. Grok audits.
-Claude is not tests-only, and does not audit its own work and call it verified.
+**Roles.** Claude implements. Codex writes tests and edits docs. Grok audits,
+in personal repos only. Claude is not tests-only, and does not audit its own
+work and call it verified.
+
+**A repo uses only the AI subscriptions its organisation pays for.** The
+repo's `.ai-profile` marker names the organisation. Agile Rising
+(`agilerising`) pays for Claude and Codex and nothing else. So in an Agile
+Rising repo, Grok and Antigravity are never used, not for audits, prompts or
+images, and nothing from the repo is sent to them. There, audits go to Codex
+and to Claude sub-agents, on a different model from the one that did the work.
+The full rule and the model assignments are in `~/repos/RULES.md`.
 
 **Do not invent product intent.** If the documents are silent, ask. In
 `maintainability-agent` it is `docs/product-intent.md`.
